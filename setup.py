@@ -7,6 +7,7 @@ setup(
                                      "NeuroLocoMiddleware", "NeuroLocoMiddleware.*"]),
     install_requires=[
     'numpy',
+    'NeuroLocoMiddleware',
     ],
 
     entry_points={
