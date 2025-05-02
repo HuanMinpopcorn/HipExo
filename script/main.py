@@ -11,8 +11,8 @@ import pandas as pd
 import re
 
 # === Parameters for admittance control ===
-M = 0.5    # virtual mass
-B = 0.2    # virtual damping
+M = 0.1   # virtual mass
+B = 1.0    # virtual damping
 K = 10.0    #  stiffness
 
 # === Buffers ===
@@ -37,18 +37,23 @@ with TMotorManager_mit_can(motor_type=Type, motor_ID=ID, max_mosfett_temp=80) as
 
 # === For plotting ===
 plt.ion()  # Turn on interactive mode
-fig, axs = plt.subplots(4, 1, figsize=(10, 8))
-lines = []
 
-for ax, label, color in zip(
-    axs,
-    ['Theta (rad)', 'Omega (rad/s)', 'Torque (Nm)', 'Desired Velocity (rad/s)'],
-    ['blue', 'orange', 'green', 'red']
-):
+# Setup
+fig, axs = plt.subplots(4, 1, figsize=(8, 10))
+labels = ['Theta (rad)', 'Omega (rad/s)', 'Torque (Nm)', 'Desired Velocity (rad/s)']
+colors = ['blue', 'orange', 'green', 'red']
+lines = []
+data = [[] for _ in range(4)]  # each data[i] holds y-values for subplot i
+times = []  # shared time base
+
+# Initialize plot
+for ax, label, color in zip(axs, labels, colors):
     line, = ax.plot([], [], color=color, label=label)
     ax.set_ylabel(label)
+    ax.grid(True)
     ax.legend()
     lines.append(line)
+
 
 axs[-1].set_xlabel('Time (s)')
 # For real-time plotting
@@ -90,75 +95,91 @@ def read_load_cell(ser, apply_offset=True):
             else:
                 print(f"Invalid reading: {line}")
         else:
-            print("\r" + "no load cell reading", end='')
+            print("\r" + "Waiting for load cell reading ...", end='')
 
 ser = serial.Serial(port='/dev/ttyUSB0', baudrate=9600, timeout=1)
 tare_load_cell(ser)
 
+# set up reference values
 theta_ref = 0.0
-
+omega_ref = 0.0
+dtheta_desired = 0.0
 
 
 # === Run Admittance Control at 1kHz ===
 print("Starting read only demo. Press ctrl+C to quit.")
-loop = SoftRealtimeLoop(dt=0.001, report=True, fade=0)
+loop = SoftRealtimeLoop(dt=0.01, report=True, fade=0)
 try :
     for t in loop:
         motor.update()
-        theta = motor.get_motor_angle_radians
-        omega = motor.get_motor_velocity_radians_per_second
-        torque = read_load_cell(ser)
-        print()
+        # Read motor state
+        theta = motor._motor_state.position 
+        omega = motor._motor_state.velocity
+        current = motor._motor_state.current
+        # torque = np.sin(2*3.142*0.5*t)
+        torque = read_load_cell(ser) + 1.5
+        # print(theta, omega, torque)
+        print(f"theta: {theta:.3f} rad, omega: {omega:.3f} rad/s, torque: {torque:.3f} Nm", end='\r')
 
         # Append to buffer
-        theta_buffer.append(theta)
-        omega_buffer.append(omega)
-        torque_buffer.append(torque)
+        # theta_buffer.append(theta)
+        # omega_buffer.append(omega)
+        # torque_buffer.append(torque)
 
-        # Wait until we have enough data
-        if len(theta_buffer) < window_size:
-            continue
+        # # Wait until we have enough data
+        # if len(theta_buffer) < window_size:
+        #     continue
 
         # Estimate θ̇ (velocity) and θ̈ (acceleration)
-        theta_dot = np.gradient(theta_buffer, loop.dt)[-1]
-        theta_ddot = np.gradient(omega_buffer, loop.dt)[-1]
+        # theta_dot = np.gradient(theta_buffer, loop.dt)[-1]
+        # theta_ddot = np.gradient(omega_buffer, loop.dt)[-1]
 
         # Desired velocity from admittance control:
         # τ = Mθ̈ + Bθ̇ + Kθ
 
-        dtheta_desired = (torque - K * theta - M * theta_ddot) / B
-
+        # dtheta_desired = (torque - K * theta - M * theta_ddot) / B
+        theta_ddot = torque / M - B * (omega - omega_ref) / M - K * (theta - theta_ref) / M
+        dtheta_desired = theta_ddot * loop.dt + dtheta_desired  
         # send the command 
-        # motor.set_speed_gains(kd=3.0)
-        # motor.velocity = dtheta_desired
+        motor.set_speed_gains(kd=10.0)
+        motor.velocity = dtheta_desired
             # Store data for plotting
         time_log.append(t)
         theta_log.append(theta)
-        omega_log.append(theta_dot)
+        omega_log.append(omega)
         torque_log.append(torque)
         dtheta_desired_log.append(dtheta_desired)
 
-        # Limit plot window to last 5 seconds (optional)
-        if len(time_log) > 100:
-            time_log = time_log[-5000:]
-            theta_log = theta_log[-5000:]
-            omega_log = omega_log[-5000:]
-            torque_log = torque_log[-5000:]
-            dtheta_desired_log = dtheta_desired_log[-5000:]
+        # # Limit plot window to last 5 seconds (optional)
+        # if len(time_log) > 100:
+        #     time_log = time_log[-5000:]
+        #     theta_log = theta_log[-5000:]
+        #     omega_log = omega_log[-5000:]
+        #     torque_log = torque_log[-5000:]
+        #     dtheta_desired_log = dtheta_desired_log[-5000:]
 
 
-        # Update plot data
-        lines[0].set_data(t, theta)  # the motor position 
-        lines[1].set_data(t, omega)  # the motor current velocity 
-        lines[2].set_data(t, torque) # the load cell reading 
-        lines[3].set_data(t, dtheta_desired) # command velocity
+        # # Update plot data
+        # lines[0].set_data(time_log, theta_log)
+        # lines[1].set_data(time_log, omega_log)
+        # lines[2].set_data(time_log, torque_log)
+        # lines[3].set_data(time_log, dtheta_desired_log)
 
-        # Adjust x/y limits dynamically
-        for i, data in enumerate([theta, omega, torque, dtheta_desired]):
-            axs[i].relim()
-            axs[i].autoscale_view()
+        # # Set x-limits dynamically to show recent time window (e.g., last 5 seconds)
+        # x_min = max(0, time_log[-1] - 5)
+        # x_max = time_log[-1]
 
-        plt.pause(0.001)
+        # for i in range(4):
+        #     axs[i].set_xlim(x_min, x_max)
+        #     axs[i].relim()
+        #     axs[i].autoscale_view(scalex=False)  # only update y-scale
+
+        # # Adjust x/y limits dynamically
+        # for i, data in enumerate([theta, omega, torque, dtheta_desired]):
+        #     axs[i].relim()
+        #     axs[i].autoscale_view()
+
+        # plt.pause(0.001)
 
 except KeyboardInterrupt:
     print("Stopping...")
