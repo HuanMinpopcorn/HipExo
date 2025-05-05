@@ -1,35 +1,58 @@
-# Hipexo Project
+# Admittance Control for HipExo 
 
-This project controls exoskeleton hardware using `TmotorCANControl`.
+**Author**: Huan Min  
+**Last Updated**: May 2025
 
-# To Set Up the Environment
-1. Install the required packages:
-   ```bash
-   pip install -e .
-   ```
-2. Install the edited `TmotorCANControl` package:
-   ```bash
-    git clone https://github.com/HuanMinpopcorn/TMotorCANControl.git
-   ```
+## 📋 Description
+
+This project implements real-time admittance control for a motor (e.g., **AK70-10**) using load cell torque feedback. The system computes a desired joint velocity from torque input and logs key motor signals for further analysis.
+
+The system supports:
+- Real-time admittance control at 1kHz
+- Serial communication with a load cell
+- Live plotting of joint position, velocity, torque, and desired velocity
+- Logging to CSV for offline analysis
+- Static plotting of saved logs
+
+---
+
+## 📁 Project Contents
+
+- `main.py` – Runs the control loop, logging, and real-time plotting
+- `plot_log.py` – Plots data from the recorded CSV log
+- `admittance_control_log.csv` – Example log file (output from `main.py`)
+- `README.md` – This documentation
+
+---
+
+## 🔧 Requirements
+
+- Python 3.8+
+- Python packages:
+  - `numpy`
+  - `pandas`
+  - `matplotlib`
+  - `pyserial`
+- Custom packages:
+  - `TMotorCANControl` (for MIT CAN motor interface)
+  - `NeuroLocoMiddleware` (for soft real-time loop)
+
+---
+
+## 🛠️ Setup Instructions
+
+1. Connect the **T-Motor AK70-10** to your computer via CAN bus.
+2. Connect the **load cell** to a serial port (default: `/dev/ttyUSB0`).
+3. Clone or copy the repo files into your Python workspace.
+4. Edit `main.py` to match your motor ID and serial port if necessary.
+5. Run the control script:
+
+```bash
+python main.py
+```
 
 
-# To Run the Code
-* step 1 . connect the hardware and run the can0 in readme at demo folder
-    ```bash
-    sudo ip link set can0 up type can bitrate 1000000
-    sudo ip link set can0 up
-    ```
-* step 2 . check the connection for motor and sensor 
-    * step 2.1 check the connection of motor
-        ```bash
-            python3 ./script/check_motor_connection_mit_can.py.py
-        ```
-    * step 2.2 check the connection of load cell 
-        ```bash
-            python3 ./script/check_load_cell_connection.py
-        ```
-* step 3 . write the admittance control 
-    * initialize the motor position and tare/calibrate load cell reading 
-    * read 10 position and 10 velocity in 1khz at t and t+1 to get theta_dot and theta ddot 
-    * read torque from load cell in 1khz 
+
+
+
 
