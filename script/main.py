@@ -9,6 +9,7 @@ from NeuroLocoMiddleware.SoftRealtimeLoop import SoftRealtimeLoop
 import matplotlib.pyplot as plt
 import pandas as pd
 import re
+from tqdm import tqdm
 
 # === Parameters for admittance control ===
 M = 0.1   # virtual mass
@@ -35,28 +36,7 @@ with TMotorManager_mit_can(motor_type=Type, motor_ID=ID, max_mosfett_temp=80) as
         print("Motor is disconencted")
 
 
-# === For plotting ===
-plt.ion()  # Turn on interactive mode
-
-# Setup
-fig, axs = plt.subplots(4, 1, figsize=(8, 10))
-labels = ['Theta (rad)', 'Omega (rad/s)', 'Torque (Nm)', 'Desired Velocity (rad/s)']
-colors = ['blue', 'orange', 'green', 'red']
-lines = []
-data = [[] for _ in range(4)]  # each data[i] holds y-values for subplot i
-times = []  # shared time base
-
-# Initialize plot
-for ax, label, color in zip(axs, labels, colors):
-    line, = ax.plot([], [], color=color, label=label)
-    ax.set_ylabel(label)
-    ax.grid(True)
-    ax.legend()
-    lines.append(line)
-
-
-axs[-1].set_xlabel('Time (s)')
-# For real-time plotting
+# === Initialize Buffers ===
 time_log = []
 theta_log = []
 omega_log = []
@@ -70,34 +50,32 @@ def tare_load_cell(ser):
     global load_cell_offset
     print("Taring load cell...")
     readings = []
-    for _ in range(1000):
+    for _ in tqdm(range(1000)):
         torque = read_load_cell(ser, apply_offset=False)
         readings.append(torque)
-        time.sleep(0.01)
+        time.sleep(0.005)
     load_cell_offset = np.mean(readings)
     print(f"Done taring. Offset: {load_cell_offset:.3f} Nm")
 
+# === Read torque from serial ===
 def read_load_cell(ser, apply_offset=True):
-    arm = 0.15  # 15 cm
+    arm = 0.15  # arm length in meters  
     while True:
         if ser.in_waiting > 0:
-            # weight = ser.readline().decode('utf-8', errors='replace').strip()
-            
-            line = ser.readline().decode('utf-8', errors='replace').strip()
-
-            match = re.search(r'[-+]?[0-9]*\.?[0-9]+', line)  # regex for a float
-            if match:
-                weight = float(match.group())
+            try:
+                line = ser.readline().decode('utf-8', errors='replace').strip()
+                weight = float(line)
                 torque = weight * arm
                 if apply_offset:
                     torque -= load_cell_offset
                 return torque
-            else:
-                print(f"Invalid reading: {line}")
+            except:
+                continue
         else:
-            print("\r" + "Waiting for load cell reading ...", end='')
+            continue
 
-ser = serial.Serial(port='/dev/ttyUSB0', baudrate=9600, timeout=1)
+
+ser = serial.Serial(port='/dev/ttyUSB0', baudrate=115200, timeout=1)
 tare_load_cell(ser)
 
 # set up reference values
@@ -105,10 +83,21 @@ theta_ref = 0.0
 omega_ref = 0.0
 dtheta_desired = 0.0
 
-
+# === Apply low-pass filter ===
+def low_pass_filter(data, alpha=0.2):
+    filtered = []
+    for i, val in enumerate(data):
+        if i == 0:
+            filtered.append(val)
+        else:
+            filtered.append(alpha * val + (1 - alpha) * filtered[i-1])
+    return filtered
 # === Run Admittance Control at 1kHz ===
 print("Starting read only demo. Press ctrl+C to quit.")
-loop = SoftRealtimeLoop(dt=0.01, report=True, fade=0)
+loop = SoftRealtimeLoop(dt=0.001, report=True, fade=0)
+tic = time.time()
+alpha = 0.01    
+torque_filtered = 0.0  # initial filtered value
 try :
     for t in loop:
         motor.update()
@@ -117,78 +106,38 @@ try :
         omega = motor._motor_state.velocity
         current = motor._motor_state.current
         # torque = np.sin(2*3.142*0.5*t)
-        torque = read_load_cell(ser) + 1.5
+        torque = read_load_cell(ser)
+        torque_filtered = alpha * torque + (1 - alpha) * torque_filtered  # ← updated filter
+
         # print(theta, omega, torque)
 
-        # Append to buffer
-        # theta_buffer.append(theta)
-        # omega_buffer.append(omega)
-        # torque_buffer.append(torque)
-
-        # # Wait until we have enough data
-        # if len(theta_buffer) < window_size:
-        #     continue
-
-        # Estimate θ̇ (velocity) and θ̈ (acceleration)
-        # theta_dot = np.gradient(theta_buffer, loop.dt)[-1]
-        # theta_ddot = np.gradient(omega_buffer, loop.dt)[-1]
 
         # Desired velocity from admittance control:
         # τ = Mθ̈ + Bθ̇ + Kθ
 
         # dtheta_desired = (torque - K * theta - M * theta_ddot) / B
-        theta_ddot = torque / M - B * (omega - omega_ref) / M - K * (theta - theta_ref) / M
-        dtheta_desired = theta_ddot * loop.dt + dtheta_desired  
+        theta_ddot = torque_filtered / M - B * (omega - omega_ref) / M - K * (theta - theta_ref) / M
+        dtheta_desired = theta_ddot * loop.dt  + omega
         # send the command 
         motor.set_speed_gains(kd=10.0)
         motor.velocity = dtheta_desired
-            # Store data for plotting
+        # Store data for plotting
         time_log.append(t)
         theta_log.append(theta)
         omega_log.append(omega)
-        torque_log.append(torque)
+        torque_log.append(torque_filtered)
         dtheta_desired_log.append(dtheta_desired)
-        print(f"theta: {theta:.3f} rad, omega: {omega:.3f} rad/s, torque: {torque:.3f} Nm", end='\r')
+        toc = time.time()
+        print(f"theta: {theta:.3f} rad, omega: {omega:.3f} rad/s, torque: {torque:.3f} Nm, dtheta_desired: {dtheta_desired:.3f} rad/s, time = {toc -tic:.3f}", end='\r')
 
 
-        # # Limit plot window to last 5 seconds (optional)
-        # if len(time_log) > 100:
-        #     time_log = time_log[-5000:]
-        #     theta_log = theta_log[-5000:]
-        #     omega_log = omega_log[-5000:]
-        #     torque_log = torque_log[-5000:]
-        #     dtheta_desired_log = dtheta_desired_log[-5000:]
-
-
-        # # Update plot data
-        # lines[0].set_data(time_log, theta_log)
-        # lines[1].set_data(time_log, omega_log)
-        # lines[2].set_data(time_log, torque_log)
-        # lines[3].set_data(time_log, dtheta_desired_log)
-
-        # # Set x-limits dynamically to show recent time window (e.g., last 5 seconds)
-        # x_min = max(0, time_log[-1] - 5)
-        # x_max = time_log[-1]
-
-        # for i in range(4):
-        #     axs[i].set_xlim(x_min, x_max)
-        #     axs[i].relim()
-        #     axs[i].autoscale_view(scalex=False)  # only update y-scale
-
-        # # Adjust x/y limits dynamically
-        # for i, data in enumerate([theta, omega, torque, dtheta_desired]):
-        #     axs[i].relim()
-        #     axs[i].autoscale_view()
-
-        # plt.pause(0.001)
+       
 
 except KeyboardInterrupt:
     print("Stopping...")
-finally:
-    # plt.ioff()
-    # plt.show()
 
-      # Save log
+finally:
+    # Save log
     data = pd.DataFrame({
         'time_s': time_log,
         'theta_rad': theta_log,
@@ -199,3 +148,7 @@ finally:
 
     data.to_csv("admittance_control_log.csv", index=False)
     print("Saved data to admittance_control_log.csv")
+    # Close serial port
+    ser.close()
+    print("Serial port closed.")
+   

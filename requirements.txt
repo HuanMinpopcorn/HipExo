@@ -3,3 +3,4 @@ python-can
 pyserial
 matplotlib
 pandas
+tqdm

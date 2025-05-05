@@ -32,3 +32,24 @@ This project controls exoskeleton hardware using `TmotorCANControl`.
     * initialize the motor position and tare/calibrate load cell reading 
     * read 10 position and 10 velocity in 1khz at t and t+1 to get theta_dot and theta ddot 
     * read torque from load cell in 1khz 
+
+install the arduino IDE and upload the code to the arduino 
+```bash
+    curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+    
+```bash
+    arduino-cli config init
+    arduino-cli config set board_manager.additional_urls https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh
+    arduino-cli config set board_manager.additional_urls https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh
+    arduino-cli config set board_manager.additional_urls https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh
+```
+```bash
+    arduino-cli core update-index
+    arduino-cli core install arduino:avr
+```
+```bash
+    arduino-cli compile --fqbn arduino:avr:uno ./script/arduino_code/
+```
+```bash
+    arduino-cli upload -p /dev/ttyUSB0 --fqbn arduino:avr:uno ./script/arduino_code/
+```
