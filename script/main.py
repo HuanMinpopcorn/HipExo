@@ -119,7 +119,6 @@ try :
         # torque = np.sin(2*3.142*0.5*t)
         torque = read_load_cell(ser) + 1.5
         # print(theta, omega, torque)
-        print(f"theta: {theta:.3f} rad, omega: {omega:.3f} rad/s, torque: {torque:.3f} Nm", end='\r')
 
         # Append to buffer
         # theta_buffer.append(theta)
@@ -149,6 +148,8 @@ try :
         omega_log.append(omega)
         torque_log.append(torque)
         dtheta_desired_log.append(dtheta_desired)
+        print(f"theta: {theta:.3f} rad, omega: {omega:.3f} rad/s, torque: {torque:.3f} Nm", end='\r')
+
 
         # # Limit plot window to last 5 seconds (optional)
         # if len(time_log) > 100:
