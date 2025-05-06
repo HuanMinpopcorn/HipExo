@@ -1,45 +1,74 @@
+import sys
 import threading
 import queue
-import sys
+import signal
 from PyQt5 import QtWidgets
 from admittance_control import AdmittanceControl, ControlParams
 from real_time_plot import RealTimePlotWidget
 
-# Dummy second thread task
-def background_logger(log_queue):
-    while True:
-        try:
-            msg = log_queue.get(timeout=1)
-            print(f"[Logger] {msg}")
-        except queue.Empty:
-            continue
+# Monkey patch signal.signal to allow SoftRealtimeLoop in background thread
+_original_signal = signal.signal
+def safe_signal(sig, handler):
+    if threading.current_thread() is threading.main_thread():
+        return _original_signal(sig, handler)
+    else:
+        print(f"[Warning] Skipped signal {sig} in background thread.")
+        return None
+signal.signal = safe_signal
+
+# Shared flags and controller setup
+should_stop = False
+control_thread = None
+controller = None  # This will be initialized in main()
+
+def start_controller():
+    global should_stop, control_thread, controller
+    if control_thread and control_thread.is_alive():
+        print("Control loop already running.")
+        return
+    print("Starting control loop...")
+    should_stop = False
+    control_thread = threading.Thread(
+        target=lambda: controller.run(lambda: should_stop),
+        daemon=True
+    )
+    control_thread.start()
+
+def stop_controller():
+    global should_stop
+    print("Stopping control loop...")
+    should_stop = True
 
 def main():
-    # Monkey-patch signal to avoid thread crash
-    import signal
-    _orig_signal = signal.signal
-    signal.signal = lambda sig, handler: _orig_signal(sig, handler) if threading.current_thread() is threading.main_thread() else print(f"[Warning] signal {sig} skipped in non-main thread")
+    global controller
 
-    # Shared state
+    # Shared data structures
     param_holder = ControlParams()
     data_queue = queue.Queue()
-    log_queue = queue.Queue()
 
-    # Thread 1: Admittance Control
-    controller = AdmittanceControl(param_holder=param_holder, plot_enabled=True, plot_queue=data_queue)
-    thread_control = threading.Thread(target=controller.run, daemon=True)
-    thread_control.start()
+    # Create controller instance (do not start thread yet)
+    controller = AdmittanceControl(
+        port='/dev/ttyUSB0',
+        motor_type='AK70-10',
+        motor_id=1,
+        param_holder=param_holder,
+        plot_enabled=True,
+        plot_queue=data_queue,
+        frequency=1000,
+    )
 
-    # Thread 2: Logger
-    thread_logger = threading.Thread(target=background_logger, args=(log_queue,), daemon=True)
-    thread_logger.start()
-
-    # Qt GUI: must run in main thread
+    # Start GUI
     app = QtWidgets.QApplication(sys.argv)
-    plot = RealTimePlotWidget(data_queue)
-    plot.setWindowTitle("Real-Time Admittance Plot")
-    plot.resize(1000, 800)
+    plot = RealTimePlotWidget(
+        data_queue,
+        param_holder,
+        start_callback=start_controller,
+        stop_callback=stop_controller
+    )
+    plot.setWindowTitle("Admittance Control GUI")
+    plot.resize(1200, 800)
     plot.show()
+
     sys.exit(app.exec_())
 
 if __name__ == "__main__":

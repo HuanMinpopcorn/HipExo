@@ -78,7 +78,7 @@ class AdmittanceControl:
         data.to_csv("admittance_control_log.csv", index=False)
         print("Saved data to admittance_control_log.csv")
 
-    def run(self):
+    def run(self, stop_flag_func=None):
         self.ser = serial.Serial(port=self.port, baudrate=self.baudrate, timeout=1)
         self.tare_load_cell()
 
@@ -102,6 +102,10 @@ class AdmittanceControl:
 
             try:
                 for t in loop:
+                    if stop_flag_func and stop_flag_func():
+                        print("\nStopping loop as requested.")
+                        motor.velocity = 0.0
+                        break
                     motor.update()
                     theta = motor._motor_state.position
                     omega = motor._motor_state.velocity
@@ -112,7 +116,7 @@ class AdmittanceControl:
 
                     theta_ddot = torque_filtered / self.M - self.B * (omega - omega_ref) / self.M - self.K * (theta - theta_ref) / self.M
                     dtheta_desired = theta_ddot * loop.dt + omega
-
+                    dtheta_desired = np.clip(dtheta_desired, -1.0, 1.0)
                     motor.velocity = dtheta_desired
 
                     self.time_log.append(t)
