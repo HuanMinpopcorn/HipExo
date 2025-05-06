@@ -1,39 +1,56 @@
-import pyqtgraph as pg
 from PyQt5 import QtWidgets, QtCore
+import pyqtgraph as pg
 
-class RealTimePlot:
-    def __init__(self):
-        self.app = QtWidgets.QApplication([])
-        self.win = pg.GraphicsLayoutWidget(title="Admittance Control Monitor")
-        self.win.resize(1000, 600)
+class RealTimePlotWidget(QtWidgets.QWidget):
+    def __init__(self, data_queue):
+        super().__init__()
+        self.queue = data_queue
+        self.max_points = 500
+        self.buffers = {
+            "time": [],
+            "torque": [],
+            "theta": [],
+            "omega": [],
+            "dtheta_desired": []
+        }
 
-        self.plot = self.win.addPlot(title="Torque vs Time")
-        self.plot.showGrid(x=True, y=True)
-        self.curve = self.plot.plot(pen='y')
+        layout = QtWidgets.QVBoxLayout()
+        self.setLayout(layout)
 
-        self.data_x = []  # time
-        self.data_y = []  # torque
+        self.plot_widget = pg.GraphicsLayoutWidget()
+        layout.addWidget(self.plot_widget)
 
-        self.ptr = 0
-        self.max_points = 1000  # sliding window
+        self.plots = {}
+        self.curves = {}
+        for i, name in enumerate(["torque", "theta", "omega", "dtheta_desired"]):
+            plot = self.plot_widget.addPlot(title=f"{name} vs Time")
+            plot.showGrid(x=True, y=True)
+            curve = plot.plot(pen=pg.intColor(i))
+            plot.setLabel('left', name)
+            plot.setLabel('bottom', 'Time', units='s')
+            self.plots[name] = plot
+            self.curves[name] = curve
+            if i < 3:
+                self.plot_widget.nextRow()
 
         self.timer = QtCore.QTimer()
-        self.timer.timeout.connect(self.update)
-        self.timer.start(20)  # update every 20ms
+        self.timer.timeout.connect(self.update_plot)
+        self.timer.start(50)
 
-        self.win.show()
+    def update_plot(self):
+        while not self.queue.empty():
+            t, torque, theta, omega, dtheta_desired = self.queue.get()
+            self.buffers["time"].append(t)
+            self.buffers["torque"].append(torque)
+            self.buffers["theta"].append(theta)
+            self.buffers["omega"].append(omega)
+            self.buffers["dtheta_desired"].append(dtheta_desired)
 
-    def append(self, t, y):
-        self.data_x.append(t)
-        self.data_y.append(y)
-        if len(self.data_x) > self.max_points:
-            self.data_x = self.data_x[-self.max_points:]
-            self.data_y = self.data_y[-self.max_points:]
+        for key in self.buffers:
+            if len(self.buffers[key]) > self.max_points:
+                self.buffers[key] = self.buffers[key][-self.max_points:]
 
-    def update(self):
-        self.curve.setData(self.data_x, self.data_y)
-        if self.data_x:
-            self.plot.setXRange(self.data_x[0], self.data_x[-1], padding=0.01)
-
-    def start(self):
-        self.app.exec_()
+        for key in self.curves:
+            self.curves[key].setData(self.buffers["time"], self.buffers[key])
+            if self.buffers["time"]:
+                self.plots[key].setXRange(self.buffers["time"][0], self.buffers["time"][-1], padding=0.01)
