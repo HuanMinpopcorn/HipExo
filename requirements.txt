@@ -4,3 +4,6 @@ pyserial
 matplotlib
 pandas
 tqdm
+pyqtgraph
+pyqt5
+NeuroLocoMiddleware
